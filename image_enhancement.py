@@ -2,60 +2,33 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 
-def adaptive_butterworth_hpf(img, energy_ratio=0.7, order=3):
+def adaptive_thresholding(img, block_size=11, C=2):
     """
-    Fixed adaptive Butterworth High-pass Filter
+    Apply adaptive thresholding to the input image.
     :param img: Input grayscale image (np.uint8)
-    :param energy_ratio: Ratio of energy to retain in low-frequency (0-1)
-    :param order: Filter order
-    :return: Filtered image (np.uint8)
+    :param block_size: Size of the local region (must be odd)
+    :param C: Constant subtracted from the mean
+    :return: Thresholded image (np.uint8)
     """
-    # 1. Fourier Transform
-    dft = np.fft.fft2(img)
-    dft_shift = np.fft.fftshift(dft)
-    
-    # 2. Calculate magnitude spectrum
-    magnitude = np.abs(dft_shift)
-    total_energy = np.sum(magnitude**2)
-    
-    # 3. Find cutoff frequency (D0)
-    sorted_mag = np.sort(magnitude.flatten())[::-1]  # Descending order
-    cumulative_energy = np.cumsum(sorted_mag**2)
-    cutoff_idx = np.argmax(cumulative_energy > energy_ratio * total_energy)
-    
-    # Handle all-zero case
-    if cutoff_idx == 0:
-        cutoff_idx = 1  # Minimum 1 pixel radius
-    
-    # 4. Generate distance matrix
+    # Get image dimensions
     rows, cols = img.shape
-    crow, ccol = rows//2, cols//2
-    y, x = np.ogrid[-crow:rows-crow, -ccol:cols-ccol]
-    D = np.sqrt(x**2 + y**2)
     
-    # Get D0 from sorted distances
-    D_sorted = np.sort(D.flatten())
-    D0 = D_sorted[cutoff_idx] if cutoff_idx < len(D_sorted) else D_sorted[-1]
+    # Pad the image
+    pad_size = block_size // 2
+    img_padded = np.pad(img, pad_size, mode='constant', constant_values=255)
     
-    # Avoid D0=0
-    D0 = max(D0, 1e-6)
+    # Initialize the output image
+    thresholded_img = np.zeros_like(img)
     
-    # 5. Butterworth filter (fixed normalization)
-    mask = 1 / (1 + (D0 / (D + 1e-6)) ** (2*order))
-    mask = np.nan_to_num(mask, nan=0.0, posinf=0.0, neginf=0.0)  # Handle NaN/INF
+    # Apply adaptive thresholding
+    for i in range(rows):
+        for j in range(cols):
+            region = img_padded[i:i + block_size, j:j + block_size]  # Corrected indexing
+            local_mean = np.mean(region)
+            threshold = local_mean - C
+            thresholded_img[i, j] = 0 if img[i, j] > threshold else 255  # Inverted output
     
-    # 6. Apply filter
-    fshift = dft_shift * mask
-    
-    # 7. Inverse FFT with safe normalization
-    img_back = np.abs(np.fft.ifft2(np.fft.ifftshift(fshift)))
-    
-    # Safe normalization
-    if np.max(img_back) - np.min(img_back) < 1e-6:
-        return np.zeros_like(img, dtype=np.uint8)
-    else:
-        img_normalized = 255 * (img_back - np.min(img_back)) / (np.max(img_back) - np.min(img_back))
-        return np.uint8(np.clip(img_normalized, 0, 255))
+    return thresholded_img
 
 if __name__ == "__main__":
     # Read image
@@ -64,7 +37,7 @@ if __name__ == "__main__":
         raise FileNotFoundError("Image not found!")
     
     # Process
-    enhanced = adaptive_butterworth_hpf(img)
+    enhanced = adaptive_thresholding(img)
     
     # Save the result
     cv2.imwrite('output_1.png', enhanced)
